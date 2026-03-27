@@ -1,2 +1,12 @@
-# NBA-Game-Flow-Analyzer-Python-
-The NBA Game Flow Analyzer is a Python based decision support tool designed to evaluate real time basketball game conditions using structured logic. The program analyzes key inputs such as total score, point differential (lead), and time remaining to classify game states into simple categories like favorable, caution, or pass.
+# NBA Game Flow Analyzer
+
+A Python-based decision support tool that evaluates NBA game conditions using rule-based logic. It analyzes score, lead, and time remaining to classify game states into risk categories.
+
+## Features
+- Real-time game flow evaluation
+- Simple decision logic (Good / Danger / Pass)
+- Lightweight Python script
+
+## How to Run
+```python
+python nba_game_flow.py
