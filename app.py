@@ -6,9 +6,6 @@ st.set_page_config(page_title="Tracker Dashboard", layout="wide")
 
 FILE = Path("tracker.csv")
 
-# -----------------------------
-# Load data
-# -----------------------------
 def load_data():
     if FILE.exists():
         df = pd.read_csv(FILE)
@@ -16,7 +13,7 @@ def load_data():
         df = pd.DataFrame(columns=[
             "team",
             "opponent",
-            "level",
+            "_level",
             "edge_score",
             "probability",
             "bet_placed",
@@ -30,49 +27,46 @@ def save_data(df):
 
 df = load_data()
 
+# Add missing columns (no layout change)
+for col, default in {
+    "team": "",
+    "opponent": "",
+    "_level": "",
+    "edge_score": 0,
+    "probability": 0,
+    "bet_placed": "n",
+    "result": "pending"
+}.items():
+    if col not in df.columns:
+        df[col] = default
+
+# Clean data
+df["team"] = df["team"].fillna("").astype(str)
+df["opponent"] = df["opponent"].fillna("").astype(str)
+df["_level"] = df["_level"].fillna("").astype(str)
+df["edge_score"] = pd.to_numeric(df["edge_score"], errors="coerce").fillna(0).astype(int)
+df["probability"] = pd.to_numeric(df["probability"], errors="coerce").fillna(0).astype(int)
+df["bet_placed"] = df["bet_placed"].fillna("n").astype(str).str.lower().str.strip()
+df["result"] = df["result"].fillna("pending").astype(str).str.lower().str.strip()
+
 st.title("Tracker Dashboard")
-
-# -----------------------------
-# Clean values
-# -----------------------------
-if not df.empty:
-    df["bet_placed"] = df["bet_placed"].astype(str).str.lower().str.strip()
-    df["result"] = df["result"].astype(str).str.lower().str.strip()
-
-# -----------------------------
-# Build game label automatically
-# -----------------------------
-if "team" in df.columns and "opponent" in df.columns:
-    df["game"] = df["team"] + " vs " + df["opponent"]
-
-# -----------------------------
-# Editable table
-# -----------------------------
 st.subheader("Recent Entries")
 
 edited_df = st.data_editor(
     df,
-    num_rows="dynamic",
     use_container_width=True,
+    num_rows="dynamic",
     key="tracker_editor",
     column_config={
-        "team": st.column_config.TextColumn("Team"),
-        "opponent": st.column_config.TextColumn("Opponent"),
-        "game": st.column_config.TextColumn("Game", disabled=True),
-
-        "level": st.column_config.SelectboxColumn(
-            "level",
-            options=["S", "E"]
-        ),
-
+        "team": st.column_config.TextColumn("Team (you can type 'Lakers vs Suns')"),
+        "opponent": st.column_config.TextColumn("Opponent (optional)"),
+        "_level": st.column_config.TextColumn("_level"),
         "edge_score": st.column_config.NumberColumn("edge_score", step=1),
         "probability": st.column_config.NumberColumn("probability", step=1),
-
         "bet_placed": st.column_config.SelectboxColumn(
             "bet_placed",
             options=["y", "n"]
         ),
-
         "result": st.column_config.SelectboxColumn(
             "result",
             options=["pending", "win", "loss", "push"]
@@ -80,25 +74,16 @@ edited_df = st.data_editor(
     },
 )
 
-# -----------------------------
-# Save buttons
-# -----------------------------
-col1, col2 = st.columns(2)
+if st.button("Save Changes"):
+    save_data(edited_df)
+    st.success("Saved.")
 
-with col1:
-    if st.button("Save Changes"):
-        save_data(edited_df)
-        st.success("Saved ✅")
+if st.button("Reload"):
+    st.rerun()
 
-with col2:
-    if st.button("Reload"):
-        st.rerun()
+st.subheader("Stats")
 
-# -----------------------------
-# Stats (ONLY placed bets)
-# -----------------------------
 placed_df = edited_df[edited_df["bet_placed"] == "y"]
-
 graded_df = placed_df[placed_df["result"].isin(["win", "loss", "push"])]
 
 wins = (graded_df["result"] == "win").sum()
@@ -108,10 +93,7 @@ pushes = (graded_df["result"] == "push").sum()
 decision = wins + losses
 win_rate = (wins / decision * 100) if decision > 0 else 0
 
-st.subheader("Stats")
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Wins", wins)
-c2.metric("Losses", losses)
-c3.metric("Pushes", pushes)
-c4.metric("Win Rate", f"{win_rate:.1f}%")
+st.metric("Wins", wins)
+st.metric("Losses", losses)
+st.metric("Pushes", pushes)
+st.metric("Win Rate", f"{win_rate:.1f}%")
