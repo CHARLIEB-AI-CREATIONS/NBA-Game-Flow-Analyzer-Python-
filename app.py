@@ -25,10 +25,6 @@ if "analysis_result" not in st.session_state:
 # Helper functions
 # ---------------------------
 def parse_bet_line_from_name(bet_name, fallback_line):
-    """
-    Tries to pull a line like 216.5 from 'Under 216.5'
-    Falls back to bet_line if it cannot parse.
-    """
     match = re.search(r"(\d+(\.\d+)?)", bet_name)
     if match:
         return float(match.group(1))
@@ -62,6 +58,44 @@ def get_q4_heat_label(q1_total, q2_total, q3_total, q4_current):
     return "NEUTRAL"
 
 
+def apply_probability_caps(probability, quarter, time_left, lead, cushion_score, q4_heat):
+    """
+    Live betting should never show fake certainty.
+    This keeps probabilities realistic.
+    """
+    # Global hard cap for live betting
+    probability = min(probability, 92)
+
+    if quarter == "4Q":
+        probability = min(probability, 88)
+
+        # Late-game volatility still exists even in great spots
+        if time_left <= 6.0:
+            probability = min(probability, 85)
+
+        # Extra cap for not-quite-dead games
+        if lead < 15:
+            probability = min(probability, 82)
+
+        # Thin cushion should never read elite
+        if cushion_score < 8:
+            probability = min(probability, 78)
+
+        # Hot Q4 should never read high confidence
+        if q4_heat == "HOT":
+            probability = min(probability, 72)
+
+        # Close enough to still foul/swing
+        if lead < 10 and time_left <= 4.0:
+            probability = min(probability, 68)
+
+        # Best-case elite setup can stay strong, but not absurd
+        if lead >= 15 and cushion_score >= 12 and q4_heat == "COOL" and time_left <= 6.0:
+            probability = min(probability, 86)
+
+    return max(1, min(int(round(probability)), 99))
+
+
 def calculate_analysis(
     team_1,
     team_2,
@@ -77,14 +111,6 @@ def calculate_analysis(
     q3_total,
     q4_current
 ):
-    """
-    V2 logic:
-    - adds quarter flow analysis
-    - adds cushion score
-    - adds trap/pass kill switches
-    - adds Q4 heat detection
-    - stays based on your current app structure
-    """
     probability = 50
     notes = []
 
@@ -200,7 +226,6 @@ def calculate_analysis(
         probability -= 22
         pass_flag = True
         notes.append("Auto-pass: too close too late")
-
     elif quarter == "4Q" and time_left <= 4.0 and lead < 10:
         probability -= 10
         trap_flag = True
@@ -259,8 +284,31 @@ def calculate_analysis(
         probability -= 4
         notes.append("Odds outside preferred NBA gate")
 
-    # Clamp
+    # ---------------------------
+    # Late volatility buffer
+    # ---------------------------
+    if quarter == "4Q" and time_left <= 6.0:
+        probability -= 5
+        notes.append("Late volatility buffer applied")
+
+    # Clamp before cap system
     probability = max(1, min(int(round(probability)), 99))
+
+    # ---------------------------
+    # Confidence caps
+    # ---------------------------
+    uncapped_probability = probability
+    probability = apply_probability_caps(
+        probability=probability,
+        quarter=quarter,
+        time_left=time_left,
+        lead=lead,
+        cushion_score=cushion_score,
+        q4_heat=q4_heat
+    )
+
+    if probability < uncapped_probability:
+        notes.append(f"Confidence cap applied: {uncapped_probability}% → {probability}%")
 
     # ---------------------------
     # Final verdict
@@ -271,7 +319,7 @@ def calculate_analysis(
     elif trap_flag and probability < 72:
         verdict = "TRAP 🚨"
         stability = "Unstable"
-    elif probability >= 82 and cushion_score >= 8 and q4_heat != "HOT":
+    elif probability >= 82 and cushion_score >= 8 and q4_heat != "HOT" and lead >= 12:
         verdict = "CRUISE CONTROL ✅"
         stability = "Stable"
     elif probability >= 72 and cushion_score >= 5 and not pass_flag:
@@ -347,6 +395,7 @@ if st.button("Analyze Bet", use_container_width=True):
         "Measuring foul risk...",
         "Reading quarter-by-quarter flow...",
         "Calculating cushion score...",
+        "Applying confidence caps...",
         "Finalizing probability...",
     ]
 
@@ -362,12 +411,14 @@ if st.button("Analyze Bet", use_container_width=True):
             status_text.text(steps[2])
         elif i < 55:
             status_text.text(steps[3])
-        elif i < 72:
+        elif i < 70:
             status_text.text(steps[4])
-        elif i < 88:
+        elif i < 82:
             status_text.text(steps[5])
-        else:
+        elif i < 92:
             status_text.text(steps[6])
+        else:
+            status_text.text(steps[7])
 
     result = calculate_analysis(
         team_1=team_1,
@@ -440,7 +491,6 @@ if st.session_state.analysis_done:
 
     st.markdown("---")
 
-    # Save analyzed bet to tracker
     if st.button("Save Bet to Tracker", use_container_width=True):
         st.session_state.bet_history.append({
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
