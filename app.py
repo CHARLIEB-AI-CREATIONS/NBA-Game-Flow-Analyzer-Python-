@@ -58,39 +58,57 @@ def get_q4_heat_label(q1_total, q2_total, q3_total, q4_current):
     return "NEUTRAL"
 
 
-def apply_probability_caps(probability, quarter, time_left, lead, cushion_score, q4_heat):
+def get_q4_pace_projection(q4_current, time_left):
+    """
+    Projects full-quarter Q4 scoring pace based on current Q4 points and time left.
+    Example:
+    - q4_current = 25
+    - time_left = 6.5
+    means 25 points scored in 5.5 minutes
+    """
+    minutes_elapsed = 12 - time_left
+
+    if minutes_elapsed <= 0:
+        return float(q4_current)
+
+    pace_per_minute = q4_current / minutes_elapsed
+    projected_full_q4 = pace_per_minute * 12
+    return round(projected_full_q4, 1)
+
+
+def apply_probability_caps(probability, quarter, time_left, lead, cushion_score, q4_heat, q4_projected):
     """
     Live betting should never show fake certainty.
     This keeps probabilities realistic.
     """
-    # Global hard cap for live betting
     probability = min(probability, 92)
 
     if quarter == "4Q":
         probability = min(probability, 88)
 
-        # Late-game volatility still exists even in great spots
         if time_left <= 6.0:
             probability = min(probability, 85)
 
-        # Extra cap for not-quite-dead games
         if lead < 15:
             probability = min(probability, 82)
 
-        # Thin cushion should never read elite
         if cushion_score < 8:
             probability = min(probability, 78)
 
-        # Hot Q4 should never read high confidence
         if q4_heat == "HOT":
             probability = min(probability, 72)
 
-        # Close enough to still foul/swing
+        if q4_projected >= 48:
+            probability = min(probability, 72)
+        elif q4_projected >= 42:
+            probability = min(probability, 76)
+        elif q4_projected >= 36:
+            probability = min(probability, 80)
+
         if lead < 10 and time_left <= 4.0:
             probability = min(probability, 68)
 
-        # Best-case elite setup can stay strong, but not absurd
-        if lead >= 15 and cushion_score >= 12 and q4_heat == "COOL" and time_left <= 6.0:
+        if lead >= 15 and cushion_score >= 12 and q4_heat == "COOL" and q4_projected <= 34:
             probability = min(probability, 86)
 
     return max(1, min(int(round(probability)), 99))
@@ -119,6 +137,7 @@ def calculate_analysis(
     cushion_score = round(parsed_line - current_total, 1)
     cushion_label = get_cushion_label(cushion_score)
     q4_heat = get_q4_heat_label(q1_total, q2_total, q3_total, q4_current)
+    q4_projected = get_q4_pace_projection(q4_current, time_left)
 
     verdict = "PASS ❌"
     stability = "Unstable"
@@ -254,7 +273,27 @@ def calculate_analysis(
     else:
         notes.append("Q4 flow is neutral")
 
+    # ---------------------------
+    # Q4 pace projection logic
+    # ---------------------------
+    if q4_projected >= 48:
+        probability -= 18
+        trap_flag = True
+        notes.append("Q4 pace projecting extremely high scoring finish")
+    elif q4_projected >= 42:
+        probability -= 12
+        trap_flag = True
+        notes.append("Q4 pace projecting high scoring finish")
+    elif q4_projected >= 36:
+        probability -= 6
+        notes.append("Q4 pace slightly elevated")
+    elif q4_projected <= 28 and quarter == "4Q":
+        probability += 4
+        notes.append("Q4 pace projecting slow finish")
+
+    # ---------------------------
     # Extra raw Q4 scoring warning
+    # ---------------------------
     if q4_current >= 35:
         probability -= 8
         trap_flag = True
@@ -291,7 +330,6 @@ def calculate_analysis(
         probability -= 5
         notes.append("Late volatility buffer applied")
 
-    # Clamp before cap system
     probability = max(1, min(int(round(probability)), 99))
 
     # ---------------------------
@@ -304,7 +342,8 @@ def calculate_analysis(
         time_left=time_left,
         lead=lead,
         cushion_score=cushion_score,
-        q4_heat=q4_heat
+        q4_heat=q4_heat,
+        q4_projected=q4_projected
     )
 
     if probability < uncapped_probability:
@@ -319,7 +358,7 @@ def calculate_analysis(
     elif trap_flag and probability < 72:
         verdict = "TRAP 🚨"
         stability = "Unstable"
-    elif probability >= 82 and cushion_score >= 8 and q4_heat != "HOT" and lead >= 12:
+    elif probability >= 82 and cushion_score >= 8 and q4_heat != "HOT" and q4_projected < 36 and lead >= 12:
         verdict = "CRUISE CONTROL ✅"
         stability = "Stable"
     elif probability >= 72 and cushion_score >= 5 and not pass_flag:
@@ -342,6 +381,7 @@ def calculate_analysis(
         "cushion_label": cushion_label,
         "parsed_bet_line": parsed_line,
         "q4_heat": q4_heat,
+        "q4_projected": q4_projected,
     }
 
 # ---------------------------
@@ -394,6 +434,7 @@ if st.button("Analyze Bet", use_container_width=True):
         "Checking quarter + time left...",
         "Measuring foul risk...",
         "Reading quarter-by-quarter flow...",
+        "Projecting Q4 pace...",
         "Calculating cushion score...",
         "Applying confidence caps...",
         "Finalizing probability...",
@@ -403,22 +444,24 @@ if st.button("Analyze Bet", use_container_width=True):
         time.sleep(0.02)
         progress_bar.progress(i + 1)
 
-        if i < 12:
+        if i < 10:
             status_text.text(steps[0])
-        elif i < 25:
+        elif i < 22:
             status_text.text(steps[1])
-        elif i < 40:
+        elif i < 35:
             status_text.text(steps[2])
-        elif i < 55:
+        elif i < 48:
             status_text.text(steps[3])
-        elif i < 70:
+        elif i < 62:
             status_text.text(steps[4])
-        elif i < 82:
+        elif i < 74:
             status_text.text(steps[5])
-        elif i < 92:
+        elif i < 84:
             status_text.text(steps[6])
-        else:
+        elif i < 92:
             status_text.text(steps[7])
+        else:
+            status_text.text(steps[8])
 
     result = calculate_analysis(
         team_1=team_1,
@@ -463,7 +506,7 @@ if st.session_state.analysis_done:
     with c4:
         st.metric("Verdict", result["verdict"])
 
-    d1, d2, d3 = st.columns(3)
+    d1, d2, d3, d4 = st.columns(4)
 
     with d1:
         st.metric("Cushion Score", result["cushion_score"])
@@ -473,6 +516,9 @@ if st.session_state.analysis_done:
 
     with d3:
         st.metric("Q4 Heat", result["q4_heat"])
+
+    with d4:
+        st.metric("Q4 Pace Proj", result["q4_projected"])
 
     st.write(f"**Matchup:** {team_1} vs {team_2}")
     st.write(f"**Bet:** {bet_name}")
@@ -513,6 +559,7 @@ if st.session_state.analysis_done:
             "Cushion Score": result["cushion_score"],
             "Cushion Label": result["cushion_label"],
             "Q4 Heat": result["q4_heat"],
+            "Q4 Pace Proj": result["q4_projected"],
             "Stability": result["stability"],
             "Verdict": result["verdict"],
             "Status": "Pending",
@@ -544,6 +591,7 @@ else:
             st.write(f"**Cushion Score:** {tracker_df.loc[i, 'Cushion Score']}")
             st.write(f"**Cushion Label:** {tracker_df.loc[i, 'Cushion Label']}")
             st.write(f"**Q4 Heat:** {tracker_df.loc[i, 'Q4 Heat']}")
+            st.write(f"**Q4 Pace Proj:** {tracker_df.loc[i, 'Q4 Pace Proj']}")
             st.write(f"**Stability:** {tracker_df.loc[i, 'Stability']}")
             st.write(f"**Verdict:** {tracker_df.loc[i, 'Verdict']}")
 
