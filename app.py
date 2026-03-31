@@ -59,13 +59,6 @@ def get_q4_heat_label(q1_total, q2_total, q3_total, q4_current):
 
 
 def get_q4_pace_projection(q4_current, time_left):
-    """
-    Projects full-quarter Q4 scoring pace based on current Q4 points and time left.
-    Example:
-    - q4_current = 25
-    - time_left = 6.5
-    means 25 points scored in 5.5 minutes
-    """
     minutes_elapsed = 12 - time_left
 
     if minutes_elapsed <= 0:
@@ -77,10 +70,6 @@ def get_q4_pace_projection(q4_current, time_left):
 
 
 def apply_probability_caps(probability, quarter, time_left, lead, cushion_score, q4_heat, q4_projected):
-    """
-    Live betting should never show fake certainty.
-    This keeps probabilities realistic.
-    """
     probability = min(probability, 92)
 
     if quarter == "4Q":
@@ -112,6 +101,20 @@ def apply_probability_caps(probability, quarter, time_left, lead, cushion_score,
             probability = min(probability, 86)
 
     return max(1, min(int(round(probability)), 99))
+
+
+def is_cruise_eligible(probability, lead, cushion_score, q4_projected, verdict):
+    """
+    Hard lock rule:
+    ONLY cruise bets are allowed.
+    """
+    return (
+        verdict == "CRUISE CONTROL ✅"
+        and probability >= 80
+        and lead >= 12
+        and cushion_score >= 8
+        and q4_projected < 36
+    )
 
 
 def calculate_analysis(
@@ -371,10 +374,27 @@ def calculate_analysis(
         verdict = "PASS ❌"
         stability = "Unstable"
 
+    locked_bet_allowed = is_cruise_eligible(
+        probability=probability,
+        lead=lead,
+        cushion_score=cushion_score,
+        q4_projected=q4_projected,
+        verdict=verdict
+    )
+
+    if not locked_bet_allowed:
+        locked_decision = "NO PLAY ❌"
+        notes.append("Locked Mode: non-cruise setups are auto-blocked")
+    else:
+        locked_decision = "BET THIS ✅"
+        notes.append("Locked Mode: cruise setup approved")
+
     return {
         "probability": probability,
         "implied_probability": implied_probability,
         "verdict": verdict,
+        "locked_decision": locked_decision,
+        "locked_bet_allowed": locked_bet_allowed,
         "stability": stability,
         "notes": notes,
         "cushion_score": cushion_score,
@@ -437,6 +457,7 @@ if st.button("Analyze Bet", use_container_width=True):
         "Projecting Q4 pace...",
         "Calculating cushion score...",
         "Applying confidence caps...",
+        "Locking decision engine...",
         "Finalizing probability...",
     ]
 
@@ -446,22 +467,24 @@ if st.button("Analyze Bet", use_container_width=True):
 
         if i < 10:
             status_text.text(steps[0])
-        elif i < 22:
+        elif i < 20:
             status_text.text(steps[1])
-        elif i < 35:
+        elif i < 30:
             status_text.text(steps[2])
-        elif i < 48:
+        elif i < 42:
             status_text.text(steps[3])
-        elif i < 62:
+        elif i < 56:
             status_text.text(steps[4])
-        elif i < 74:
+        elif i < 68:
             status_text.text(steps[5])
-        elif i < 84:
+        elif i < 80:
             status_text.text(steps[6])
-        elif i < 92:
+        elif i < 89:
             status_text.text(steps[7])
-        else:
+        elif i < 95:
             status_text.text(steps[8])
+        else:
+            status_text.text(steps[9])
 
     result = calculate_analysis(
         team_1=team_1,
@@ -520,6 +543,12 @@ if st.session_state.analysis_done:
     with d4:
         st.metric("Q4 Pace Proj", result["q4_projected"])
 
+    st.markdown("### Locked Decision")
+    if result["locked_bet_allowed"]:
+        st.success(result["locked_decision"])
+    else:
+        st.error(result["locked_decision"])
+
     st.write(f"**Matchup:** {team_1} vs {team_2}")
     st.write(f"**Bet:** {bet_name}")
     st.write(f"**Quarter:** {quarter}")
@@ -537,34 +566,38 @@ if st.session_state.analysis_done:
 
     st.markdown("---")
 
-    if st.button("Save Bet to Tracker", use_container_width=True):
-        st.session_state.bet_history.append({
-            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Team 1": team_1,
-            "Team 2": team_2,
-            "Bet Name": bet_name,
-            "Quarter": quarter,
-            "Time Left": time_left,
-            "Lead": lead,
-            "Current Total": current_total,
-            "Bet Line": bet_line,
-            "Parsed Bet Line": result["parsed_bet_line"],
-            "Odds": odds,
-            "Q1 Total": q1_total,
-            "Q2 Total": q2_total,
-            "Q3 Total": q3_total,
-            "Q4 Current": q4_current,
-            "Probability": f"{result['probability']}%",
-            "Implied Prob": f"{result['implied_probability']}%",
-            "Cushion Score": result["cushion_score"],
-            "Cushion Label": result["cushion_label"],
-            "Q4 Heat": result["q4_heat"],
-            "Q4 Pace Proj": result["q4_projected"],
-            "Stability": result["stability"],
-            "Verdict": result["verdict"],
-            "Status": "Pending",
-        })
-        st.success("Bet saved to tracker ✅")
+    if result["locked_bet_allowed"]:
+        if st.button("Save Bet to Tracker", use_container_width=True):
+            st.session_state.bet_history.append({
+                "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Team 1": team_1,
+                "Team 2": team_2,
+                "Bet Name": bet_name,
+                "Quarter": quarter,
+                "Time Left": time_left,
+                "Lead": lead,
+                "Current Total": current_total,
+                "Bet Line": bet_line,
+                "Parsed Bet Line": result["parsed_bet_line"],
+                "Odds": odds,
+                "Q1 Total": q1_total,
+                "Q2 Total": q2_total,
+                "Q3 Total": q3_total,
+                "Q4 Current": q4_current,
+                "Probability": f"{result['probability']}%",
+                "Implied Prob": f"{result['implied_probability']}%",
+                "Cushion Score": result["cushion_score"],
+                "Cushion Label": result["cushion_label"],
+                "Q4 Heat": result["q4_heat"],
+                "Q4 Pace Proj": result["q4_projected"],
+                "Stability": result["stability"],
+                "Verdict": result["verdict"],
+                "Locked Decision": result["locked_decision"],
+                "Status": "Pending",
+            })
+            st.success("Bet saved to tracker ✅")
+    else:
+        st.warning("Tracker save disabled: Locked Mode only allows CRUISE CONTROL bets.")
 
 # ---------------------------
 # Tracker section
@@ -594,6 +627,7 @@ else:
             st.write(f"**Q4 Pace Proj:** {tracker_df.loc[i, 'Q4 Pace Proj']}")
             st.write(f"**Stability:** {tracker_df.loc[i, 'Stability']}")
             st.write(f"**Verdict:** {tracker_df.loc[i, 'Verdict']}")
+            st.write(f"**Locked Decision:** {tracker_df.loc[i, 'Locked Decision']}")
 
         with col_b:
             new_status = st.selectbox(
