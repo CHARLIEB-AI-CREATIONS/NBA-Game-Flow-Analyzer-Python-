@@ -1,190 +1,280 @@
 import streamlit as st
 import pandas as pd
-from pathlib import Path
+import time
+from datetime import datetime
 
-st.set_page_config(page_title="NBA Live Under Analyzer", layout="wide")
+st.set_page_config(page_title="NBA Flow Analyzer", layout="wide")
 
-FILE = Path("tracker.csv")
+st.title("🏀 NBA Flow Analyzer")
+st.caption("Live bet analyzer + tracker")
 
-# -----------------------------
-# TRACKER HELPERS
-# -----------------------------
-def load_data():
-    if FILE.exists():
-        df = pd.read_csv(FILE)
+# ---------------------------
+# Session state setup
+# ---------------------------
+if "bet_history" not in st.session_state:
+    st.session_state.bet_history = []
+
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
+
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = {}
+
+# ---------------------------
+# Helper functions
+# ---------------------------
+def calculate_analysis(team_1, team_2, bet_name, quarter, time_left, lead, current_total, bet_line, odds):
+    """
+    Basic placeholder logic.
+    You can tighten this later with your real system.
+    """
+    probability = 50
+    verdict = "PASS"
+    stability = "Unstable"
+    notes = []
+
+    # Quarter boost
+    if quarter == "4Q":
+        probability += 10
+        notes.append("4Q timing boost")
+
+    # Lead logic
+    if lead >= 15:
+        probability += 18
+        notes.append("Blowout script favors slower finish")
+    elif lead >= 10:
+        probability += 10
+        notes.append("Solid lead supports under")
+    elif lead >= 6:
+        probability += 4
+        notes.append("Moderate lead")
     else:
-        df = pd.DataFrame(columns=[
-            "team",
-            "opponent",
-            "_level",
-            "edge_score",
-            "probability",
-            "bet_placed",
-            "result"
-        ])
-        df.to_csv(FILE, index=False)
-    return df
+        probability -= 8
+        notes.append("Close game raises foul risk")
 
-def save_data(df):
-    df.to_csv(FILE, index=False)
+    # Time left logic
+    if time_left <= 7:
+        probability += 8
+        notes.append("Late-game clock advantage")
+    elif time_left <= 9:
+        probability += 4
+        notes.append("Good live window")
 
-def ensure_tracker_columns(df):
-    defaults = {
-        "team": "",
-        "opponent": "",
-        "_level": "",
-        "edge_score": 0,
-        "probability": 0,
-        "bet_placed": "n",
-        "result": "pending",
+    # Cushion between live total and your bet line
+    cushion = bet_line - current_total
+    if cushion >= 28:
+        probability += 12
+        notes.append("Large scoring cushion")
+    elif cushion >= 20:
+        probability += 8
+        notes.append("Good scoring cushion")
+    elif cushion >= 12:
+        probability += 3
+        notes.append("Moderate scoring cushion")
+    else:
+        probability -= 6
+        notes.append("Thin cushion")
+
+    # Odds note
+    if -400 <= odds <= -280:
+        notes.append("Odds fit your preferred NBA gate")
+    else:
+        notes.append("Odds outside preferred NBA gate")
+
+    # Clamp
+    probability = max(1, min(probability, 99))
+
+    # Stability / verdict
+    if probability >= 80:
+        verdict = "EXECUTE BET ✅"
+        stability = "Stable"
+    elif probability >= 70:
+        verdict = "LEAN / SMALLER PLAY ⚠️"
+        stability = "Medium"
+    else:
+        verdict = "PASS ❌"
+        stability = "Unstable"
+
+    # Extra foul warning
+    if lead <= 8 and quarter == "4Q" and time_left <= 3:
+        notes.append("Late foul risk elevated")
+
+    return {
+        "probability": probability,
+        "verdict": verdict,
+        "stability": stability,
+        "notes": notes,
     }
-    for col, default in defaults.items():
-        if col not in df.columns:
-            df[col] = default
 
-    df["team"] = df["team"].fillna("").astype(str)
-    df["opponent"] = df["opponent"].fillna("").astype(str)
-    df["_level"] = df["_level"].fillna("").astype(str)
-    df["edge_score"] = pd.to_numeric(df["edge_score"], errors="coerce").fillna(0).astype(int)
-    df["probability"] = pd.to_numeric(df["probability"], errors="coerce").fillna(0).astype(int)
-    df["bet_placed"] = df["bet_placed"].fillna("n").astype(str).str.lower().str.strip()
-    df["result"] = df["result"].fillna("pending").astype(str).str.lower().str.strip()
-    return df
-
-df = ensure_tracker_columns(load_data())
-
-# -----------------------------
-# ORIGINAL APP HEADER / STYLE
-# -----------------------------
-st.title("🏀 NBA Live Under Analyzer")
-st.caption("Built by Charles Barnes")
-
-st.divider()
-
-# -----------------------------
-# ORIGINAL ANALYZER LAYOUT
-# -----------------------------
-st.header("Game Inputs")
-
-quarter = st.selectbox("Quarter", ["1Q", "2Q", "3Q", "4Q"], index=3)
-time_left = st.text_input("Time Left (M:SS)", value="6:30")
-total_score = st.number_input("Total Score (both teams)", min_value=0, value=228, step=1)
-lead = st.number_input("Lead", min_value=0, value=10, step=1)
-live_line = st.number_input("Live Betting Line", min_value=0.0, value=234.50, step=0.5)
-
-# -----------------------------
-# SIMPLE PLACEHOLDER LOGIC
-# Replace this block with your real original logic if needed
-# -----------------------------
-points_needed = max(live_line - total_score, 0)
-minutes_left = 0.0
-try:
-    mins, secs = time_left.split(":")
-    minutes_left = int(mins) + int(secs) / 60
-except:
-    minutes_left = 0.0
-
-needed_pace = round(points_needed / minutes_left, 2) if minutes_left > 0 else 0.0
-
-# Example decision logic
-if quarter == "4Q" and lead >= 10 and needed_pace >= 1.0:
-    decision = "PASS ❌"
-    confidence = 15
-    foul_risk = "LOW"
-    decision_color = "red"
-elif quarter == "4Q" and lead >= 10:
-    decision = "SAFE ✅"
-    confidence = 78
-    foul_risk = "LOW"
-    decision_color = "green"
-else:
-    decision = "MONITOR ⚠️"
-    confidence = 55
-    foul_risk = "MEDIUM"
-    decision_color = "orange"
-
-st.header("Final Decision")
-
-if decision_color == "green":
-    st.success(f"{decision} — {confidence}%")
-elif decision_color == "orange":
-    st.warning(f"{decision} — {confidence}%")
-else:
-    st.error(f"{decision} — {confidence}%")
-
-st.progress(confidence / 100)
-
-st.write(f"**Confidence Level:** {confidence}%")
-st.write(f"**Foul Risk:** {foul_risk}")
-
-st.header("Game Breakdown")
-c1, c2 = st.columns(2)
-with c1:
-    st.metric("Points Needed", f"{points_needed:.1f}")
-    st.metric("Time Left", time_left)
-with c2:
-    st.metric("Needed Pace", f"{needed_pace:.2f}")
-    st.metric("Lead", int(lead))
-
-st.divider()
-
-# -----------------------------
-# TRACKER SECTION
-# -----------------------------
-st.title("Tracker Dashboard")
-st.subheader("Recent Entries")
-
-edited_df = st.data_editor(
-    df[["team", "opponent", "_level", "edge_score", "probability", "bet_placed", "result"]],
-    use_container_width=True,
-    num_rows="dynamic",
-    key="tracker_editor",
-    column_config={
-        "team": st.column_config.TextColumn("team"),
-        "opponent": st.column_config.TextColumn("opponent"),
-        "_level": st.column_config.TextColumn("_level"),
-        "edge_score": st.column_config.NumberColumn("edge_score", step=1),
-        "probability": st.column_config.NumberColumn("probability", step=1),
-        "bet_placed": st.column_config.SelectboxColumn(
-            "bet_placed",
-            options=["y", "n"]
-        ),
-        "result": st.column_config.SelectboxColumn(
-            "result",
-            options=["pending", "win", "loss", "push"]
-        ),
-    },
-)
+# ---------------------------
+# Input section
+# ---------------------------
+st.subheader("Game Input")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("Save Changes"):
-        save_data(edited_df)
-        st.success("Saved.")
+    team_1 = st.text_input("Team 1", value="SAC Kings")
+    team_2 = st.text_input("Team 2", value="BKN Nets")
+    bet_name = st.text_input("Bet Name", value="Under 216.5")
+    odds = st.number_input("Odds", value=-300, step=1)
 
 with col2:
-    if st.button("Reload"):
-        st.rerun()
+    quarter = st.selectbox("Quarter", ["1Q", "2Q", "3Q", "4Q"], index=3)
+    time_left = st.number_input("Time Left (minutes)", min_value=0.0, max_value=12.0, value=6.2, step=0.1)
+    lead = st.number_input("Lead Margin", min_value=0, max_value=60, value=19, step=1)
+    current_total = st.number_input("Current Total Points", min_value=0, max_value=300, value=185, step=1)
+    bet_line = st.number_input("Bet Line", min_value=0.0, max_value=350.0, value=216.5, step=0.5)
 
-st.subheader("Stats")
+# ---------------------------
+# Analyze button with visual feedback
+# ---------------------------
+st.markdown("---")
 
-placed_df = edited_df[edited_df["bet_placed"] == "y"].copy()
-graded_df = placed_df[placed_df["result"].isin(["win", "loss", "push"])].copy()
+if st.button("Analyze Bet", use_container_width=True):
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-wins = int((graded_df["result"] == "win").sum())
-losses = int((graded_df["result"] == "loss").sum())
-pushes = int((graded_df["result"] == "push").sum())
+    steps = [
+        "Loading game state...",
+        "Checking score margin...",
+        "Checking quarter + time left...",
+        "Measuring foul risk...",
+        "Comparing current total to bet line...",
+        "Finalizing probability...",
+    ]
 
-decision_bets = wins + losses
-win_rate = (wins / decision_bets * 100) if decision_bets > 0 else 0.0
+    for i in range(100):
+        time.sleep(0.02)
+        progress_bar.progress(i + 1)
 
-s1, s2, s3, s4 = st.columns(4)
-with s1:
-    st.metric("Wins", wins)
-with s2:
-    st.metric("Losses", losses)
-with s3:
-    st.metric("Pushes", pushes)
-with s4:
-    st.metric("Win Rate", f"{win_rate:.1f}%")
+        if i < 15:
+            status_text.text(steps[0])
+        elif i < 30:
+            status_text.text(steps[1])
+        elif i < 50:
+            status_text.text(steps[2])
+        elif i < 70:
+            status_text.text(steps[3])
+        elif i < 90:
+            status_text.text(steps[4])
+        else:
+            status_text.text(steps[5])
+
+    result = calculate_analysis(
+        team_1=team_1,
+        team_2=team_2,
+        bet_name=bet_name,
+        quarter=quarter,
+        time_left=time_left,
+        lead=lead,
+        current_total=current_total,
+        bet_line=bet_line,
+        odds=odds,
+    )
+
+    st.session_state.analysis_done = True
+    st.session_state.analysis_result = result
+
+    status_text.text("Analysis Complete ✅")
+
+# ---------------------------
+# Analysis output
+# ---------------------------
+if st.session_state.analysis_done:
+    st.subheader("Analysis Result")
+
+    result = st.session_state.analysis_result
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric("Probability", f"{result['probability']}%")
+
+    with c2:
+        st.metric("Stability", result["stability"])
+
+    with c3:
+        st.metric("Verdict", result["verdict"])
+
+    st.write(f"**Matchup:** {team_1} vs {team_2}")
+    st.write(f"**Bet:** {bet_name}")
+    st.write(f"**Quarter:** {quarter}")
+    st.write(f"**Time Left:** {time_left}")
+    st.write(f"**Lead Margin:** {lead}")
+    st.write(f"**Current Total:** {current_total}")
+    st.write(f"**Bet Line:** {bet_line}")
+    st.write(f"**Odds:** {odds}")
+
+    st.markdown("**Why:**")
+    for note in result["notes"]:
+        st.write(f"- {note}")
+
+    st.markdown("---")
+
+    # Save analyzed bet to tracker
+    if st.button("Save Bet to Tracker", use_container_width=True):
+        st.session_state.bet_history.append({
+            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Team 1": team_1,
+            "Team 2": team_2,
+            "Bet Name": bet_name,
+            "Quarter": quarter,
+            "Time Left": time_left,
+            "Lead": lead,
+            "Current Total": current_total,
+            "Bet Line": bet_line,
+            "Odds": odds,
+            "Probability": f"{result['probability']}%",
+            "Stability": result["stability"],
+            "Verdict": result["verdict"],
+            "Status": "Pending",
+        })
+        st.success("Bet saved to tracker ✅")
+
+# ---------------------------
+# Tracker section
+# ---------------------------
+st.markdown("---")
+st.subheader("Bet Tracker")
+
+if len(st.session_state.bet_history) == 0:
+    st.info("No bets saved yet.")
+else:
+    tracker_df = pd.DataFrame(st.session_state.bet_history)
+
+    for i in range(len(tracker_df)):
+        st.markdown(f"### Bet #{i + 1}")
+        col_a, col_b = st.columns([3, 1])
+
+        with col_a:
+            st.write(f"**Time:** {tracker_df.loc[i, 'Time']}")
+            st.write(f"**Game:** {tracker_df.loc[i, 'Team 1']} vs {tracker_df.loc[i, 'Team 2']}")
+            st.write(f"**Bet:** {tracker_df.loc[i, 'Bet Name']}")
+            st.write(f"**Odds:** {tracker_df.loc[i, 'Odds']}")
+            st.write(f"**Probability:** {tracker_df.loc[i, 'Probability']}")
+            st.write(f"**Stability:** {tracker_df.loc[i, 'Stability']}")
+            st.write(f"**Verdict:** {tracker_df.loc[i, 'Verdict']}")
+
+        with col_b:
+            new_status = st.selectbox(
+                f"Status for Bet #{i + 1}",
+                ["Pending", "Win", "Loss", "Pass"],
+                index=["Pending", "Win", "Loss", "Pass"].index(tracker_df.loc[i, "Status"]),
+                key=f"status_{i}"
+            )
+            st.session_state.bet_history[i]["Status"] = new_status
+
+        st.markdown("---")
+
+    final_df = pd.DataFrame(st.session_state.bet_history)
+    st.dataframe(final_df, use_container_width=True)
+
+    csv = final_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download Tracker CSV",
+        data=csv,
+        file_name="nba_bet_tracker.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
